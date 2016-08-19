@@ -125,7 +125,6 @@ def main():
     colors = ["g", "r", "b", "k", "c","m"]
     for s in range(num_solvers):
         labels = args.data_files[s]+" ("+ str(no_failures[s]) + " failures)"
-        print s % len(lines)
         plt.step(solver[:,0,s],
                  solver[:,1,s],
                  label=labels,
