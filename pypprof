@@ -1,0 +1,235 @@
+#!/usr/bin/python
+
+# for usage information, type pypprof --help 
+#
+# pypprof reads in data from files containing performance data for some metric.
+# Each piece of software requires its own data file, and each
+#  column of each file corresponds to one metric value 
+#  representing the software's performance on a test problem.
+#  Failures should be represented by negative values.
+# 
+# Because each line corresponds to a test problem, the
+#  order of the problem values should be maintained across files.
+# The required arguments (of which there must be at least 3) are the
+#  names of the data files, the column we're interested in (placed after the -c flag), 
+#  and a label for the statistic being compared 
+#  (e.g. "feval" could be used for function evaluations)
+# See the help for the full range of options
+#
+#  Tyrone Rees, RAL, August 2016
+#  (inspired by the shell script pprof by Nick Gould, 
+#   which uses the perl script newperf3 by Nick Gould,
+#   which in turn was an adaptation of the perl script perfneger by Liz Dolan)
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import argparse 
+import math
+
+def main():
+    # first, use argparse to read in the arguments passed to the routine
+    parser = argparse.ArgumentParser(
+        prog='pypprof',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=('''
+        This program generates performance profile plots.It accepts any number of 
+        text files, each corresponding to a different method being compared.
+        The text files must contain columns of data, with each row corresponding to a 
+        different test problem and each column corresponding to a different statistic.
+        The test problems must be in the same rows across the input files.
+        This program produces a performance profile chart for one of the statistics. 
+        
+        Performance profiles are described in:
+        Benchmarking optimization software with performance profiles, 
+        Dolan, E. & More, J. Math. Program. (2002) 91: 201. doi:10.1007/s101070100263
+        ''')
+    )
+    parser.add_argument('data_files', 
+                        nargs='*', 
+                        help="the filenames of the data files we want to compare (required)")
+    parser.add_argument('--column_number','-c', 
+                        help="the column that holds the data you want to compare",
+                        required="True", 
+                        type = int)
+    parser.add_argument('--statistic','-s', 
+                        help="the name of the statistic that is being compared", 
+                        required="True")
+    parser.add_argument('--test_set','-t',
+                        help="the name of the test set being run (default = problems)", 
+                        default="problems")
+    parser.add_argument('--max_x_range','-mxx',
+                        help="upper range for x in the plot (default = 10.0)",
+                        default=10.0, 
+                        type=float)
+    parser.add_argument('--min_x_range','-mnx',
+                        help="lower range for x in the plot(default = 0.0 if log scale used, 1.0 otherwise )",
+                        type=float)
+    parser.add_argument('--max_y_range','-mxy',
+                        help="upper range for y in the plot (default = 1.0)",
+                        default=1.0, 
+                        type=float)
+    parser.add_argument('--min_y_range','-mny',
+                        help="lower range for y in the plot (default = 0.0)",
+                        default=0.0, 
+                        type=float)
+    parser.add_argument('--log','-l',
+                        help="if present, then a log scale is used", 
+                        action="store_true")
+    parser.add_argument('--figure_type','-ft',
+                        help="specify a custom figure type to be output (default png)",
+                        default="png")
+    parser.add_argument('--figure_name','-fn',
+                        help="specify a custom figure name (default='profile_STATISTIC', where STATISTIC is the value set by the -s flag)")
+    parser.add_argument('--no_plot','-np',
+                        help="if present, the plot is not displayed (but is still saved)", 
+                        action="store_true")
+    args = parser.parse_args()
+    
+    data = get_data(args)    
+
+    matlabmax = get_matlabmax(data,args.log)
+
+    [num_probs,num_solvers] = data.shape
+    solver_ratios = np.zeros(data.shape)
+    no_failures = np.zeros(num_solvers,dtype=int)
+    for i in range(num_probs):
+        # order the nonzero times in each row
+        prob_times = data[i][data[i][:] > 0.0]
+        ordered = np.sort(prob_times)
+        for s in range(num_solvers):
+            if data[i][s] < 0.0:
+                prob_ratio = matlabmax
+                no_failures[s] = no_failures[s] + 1
+            else:
+                if data[i][s] == 0.00001 and ordered[0] == 0.00001:
+                    prob_ratio = 1.0
+                else:
+                    prob_ratio = 1.0 * data[i][s] / ordered[0]
+                if args.log:
+                    prob_ratio = math.log(prob_ratio) / math.log(2)
+            solver_ratios[i][s] = prob_ratio
+
+    # get the plotting data
+    [num_probs,num_solvers] = data.shape
+    solver = np.zeros((num_probs+1,2,num_solvers))
+    for i in range(num_probs):
+        solver[i+1,1,:] = (i+1) / float(num_probs)
+    for s in range(num_solvers):
+        rarray = solver_ratios[:,s]
+        ordered = np.sort(rarray)
+        solver[1:,0,s] = ordered
+    
+    # now let's plot
+    lines = [ "-", "-.", "--",":"]
+    colors = ["g", "r", "b", "k", "c","m"]
+    for s in range(num_solvers):
+        labels = args.data_files[s]+" ("+ str(no_failures[s]) + " failures)"
+        print s % len(lines)
+        plt.step(solver[:,0,s],
+                 solver[:,1,s],
+                 label=labels,
+                 color=colors[(s % len(colors))],
+                 ls=lines[(s % len(lines))],
+                 lw=1.5,
+                 where='post')
+    plt.ylim(args.min_y_range, args.max_y_range)
+    if args.min_x_range == None:
+        if args.log:
+            min_x_range = 0.0
+        else:
+            min_x_range = 1.0
+    else:
+        min_x_range = args.min_x_range
+    plt.xlim(min_x_range,args.max_x_range)
+    plt.legend(loc=4)
+    titlestring = "Profile: " + args.statistic + " - " + str(num_probs) +" "+ args.test_set
+    plt.title(titlestring)
+    plt.ylabel("fraction for which solver within f of best")
+    plt.xlabel("f")
+    if args.figure_name is not None:
+        filename = args.figure_name+"."+args.figure_type
+    else: 
+        filename = "profile_"+args.statistic +"."+args.figure_type
+    plt.savefig(filename)
+    print "Plot has been saved as "+filename
+    if not args.no_plot:
+        plt.show()
+    
+
+
+def get_data(args):
+    # This routine takes in the arguments passed to pypprof, and returns 
+    #    data
+    # a numpy array of size (len_col x  no_data_files)
+    # where there each column contains the data to be analysed from a different 
+    # source file
+
+    no_data_files = len(args.data_files)
+    
+    python_column_number = int(args.column_number) - 1
+    filenumber = 0 
+    for data_file in args.data_files:
+        try:
+            f = open(data_file,"r")
+        except IOError:
+            print 'Error: cannot open', data_file
+            return
+        lines = f.readlines()
+        result = []
+        for x in lines:
+            try:
+                result.append(x.split()[python_column_number])
+            except IndexError:
+                print "Error: the data file doesn't appear to have "+ \
+                    args.column_number+" columns"
+                return
+        f.close()
+        if filenumber == 0:
+            # create an array to fit data in 
+            data = np.zeros((len(result),no_data_files))
+            data[:,0] = result
+            #ata[0] = result
+        else:
+            try:
+                data[:,filenumber] = result
+            except ValueError:
+                print "Please ensure that the datafiles have the same length"
+                return
+        filenumber =+1
+
+    # now we have the data available, let's clean it up
+    # Let's look for zeros, and perturb slightly if needed
+    zero_data = np.argwhere( data == 0.0 ) 
+    for zero_index in zero_data:
+        data[zero_index[0]][zero_index[1]] =+ 0.0025 + 0.00125*(2.0 * np.random.rand() - 1.0)
+    
+    return data
+
+def get_matlabmax(data,log):
+    [num_probs,num_solvers] = data.shape
+    largest = -1.0
+
+    for i in range(num_probs):
+        # get the non zero entries for each row
+        prob_times = data[i][data[i][:] > 0.0]
+        # order these
+        ordered = np.sort(prob_times)
+        if len(ordered) > 0: 
+            ratio = ordered[-1] / ordered[0] # ratio of the biggest to smallest
+            if log:
+                ratio = math.log(ratio) / math.log(2)
+            if ratio > largest:
+                largest = ratio
+                            
+    matlabmax = 1.01 * largest
+
+    return matlabmax
+
+def get_solver_ratios(data,matlabmax,log):
+    
+        
+    return solver_ratios
+    
+if __name__ == "__main__":
+    main()
