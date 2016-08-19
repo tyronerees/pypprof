@@ -198,8 +198,6 @@ def get_data(args):
                 print "Please ensure that the datafiles have the same length"
                 return
         filenumber += 1
-        print filenumber
-        print data
         
     # now we have the data available, let's clean it up
     # Let's look for zeros, and perturb slightly if needed
