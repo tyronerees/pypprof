@@ -147,7 +147,11 @@ def main():
     titlestring = "Profile: " + args.statistic + " - " + str(num_probs) +" "+ args.test_set
     plt.title(titlestring)
     plt.ylabel("fraction for which solver within f of best")
-    plt.xlabel("f")
+    if args.log:
+        xlabel = "log(f)"
+    else:
+        xlabel = "f"
+    plt.xlabel(xlabel)
     if args.figure_name is not None:
         filename = args.figure_name+"."+args.figure_type
     else: 
